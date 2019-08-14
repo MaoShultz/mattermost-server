@@ -58,7 +58,6 @@ func (a *App) InstallPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 
 func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Manifest, *model.AppError) {
 	// Stash the previous state of the plugin, if available
-	stashedStates := a.Config().PluginSettings.PluginStates
 
 	mlog.Info("installPlugin.installPluginLocally in")
 	manifest, appErr := a.installPluginLocally(pluginFile, replace)
@@ -76,6 +75,7 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 
 	mlog.Info("installPlugin.notifyClusterPluginEvent in")
 
+	// Notify cluster peers async
 	a.notifyClusterPluginEvent(
 		model.CLUSTER_EVENT_INSTALL_PLUGIN,
 		model.PluginEventData{
@@ -84,15 +84,6 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 	)
 
 	mlog.Info("installPlugin.notifyClusterPluginEvent out")
-
-	// Enable plugin after all cluster peers are updated
-	if stashedStates[manifest.Id] != nil && stashedStates[manifest.Id].Enable {
-		mlog.Info("installPlugin.EnablePlugin in")
-
-		a.EnablePlugin(manifest.Id)
-		mlog.Info("installPlugin.EnablePlugin out")
-
-	}
 
 	if err := a.notifyPluginStatusesChanged(); err != nil {
 		mlog.Error("failed to notify plugin status changed", mlog.Err(err))
@@ -104,23 +95,23 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 func (a *App) installPluginLocally(pluginFile io.ReadSeeker, replace bool) (*model.Manifest, *model.AppError) {
 	pluginsEnvironment := a.GetPluginsEnvironment()
 	if pluginsEnvironment == nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.disabled.app_error", nil, "", http.StatusNotImplemented)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.disabled.app_error", nil, "", http.StatusNotImplemented)
 	}
 
 	tmpDir, err := ioutil.TempDir("", "plugintmp")
 	if err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.filesystem.app_error", nil, err.Error(), http.StatusInternalServerError)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.filesystem.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	if err = utils.ExtractTarGz(pluginFile, tmpDir); err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.extract.app_error", nil, err.Error(), http.StatusBadRequest)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.extract.app_error", nil, err.Error(), http.StatusBadRequest)
 	}
 
 	tmpPluginDir := tmpDir
 	dir, err := ioutil.ReadDir(tmpDir)
 	if err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.filesystem.app_error", nil, err.Error(), http.StatusInternalServerError)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.filesystem.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 
 	if len(dir) == 1 && dir[0].IsDir() {
@@ -129,27 +120,29 @@ func (a *App) installPluginLocally(pluginFile io.ReadSeeker, replace bool) (*mod
 
 	manifest, _, err := model.FindManifest(tmpPluginDir)
 	if err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.manifest.app_error", nil, err.Error(), http.StatusBadRequest)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.manifest.app_error", nil, err.Error(), http.StatusBadRequest)
 	}
 
 	if !plugin.IsValidId(manifest.Id) {
-		return nil, model.NewAppError("installPlugin", "app.plugin.invalid_id.app_error", map[string]interface{}{"Min": plugin.MinIdLength, "Max": plugin.MaxIdLength, "Regex": plugin.ValidIdRegex}, "", http.StatusBadRequest)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.invalid_id.app_error", map[string]interface{}{"Min": plugin.MinIdLength, "Max": plugin.MaxIdLength, "Regex": plugin.ValidIdRegex}, "", http.StatusBadRequest)
 	}
 
 	bundles, err := pluginsEnvironment.Available()
 	if err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.install.app_error", nil, err.Error(), http.StatusInternalServerError)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.install.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
+
+	stashedStates := a.Config().PluginSettings.PluginStates
 
 	// Check that there is no plugin with the same ID
 	for _, bundle := range bundles {
 		if bundle.Manifest != nil && bundle.Manifest.Id == manifest.Id {
 			if !replace {
-				return nil, model.NewAppError("installPlugin", "app.plugin.install_id.app_error", nil, "", http.StatusBadRequest)
+				return nil, model.NewAppError("installPluginLocally", "app.plugin.install_id.app_error", nil, "", http.StatusBadRequest)
 			}
 
 			if err := a.removePluginLocally(manifest.Id); err != nil {
-				return nil, model.NewAppError("installPlugin", "app.plugin.install_id_failed_remove.app_error", nil, "", http.StatusBadRequest)
+				return nil, model.NewAppError("installPluginLocally", "app.plugin.install_id_failed_remove.app_error", nil, "", http.StatusBadRequest)
 			}
 		}
 	}
@@ -157,22 +150,28 @@ func (a *App) installPluginLocally(pluginFile io.ReadSeeker, replace bool) (*mod
 	pluginPath := filepath.Join(*a.Config().PluginSettings.Directory, manifest.Id)
 	err = utils.CopyDir(tmpPluginDir, pluginPath)
 	if err != nil {
-		return nil, model.NewAppError("installPlugin", "app.plugin.mvdir.app_error", nil, err.Error(), http.StatusInternalServerError)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.mvdir.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 
 	// Flag plugin locally as managed by the filestore.
 	f, err := os.Create(filepath.Join(pluginPath, managedPluginFileName))
 	if err != nil {
-		return nil, model.NewAppError("uploadPlugin", "app.plugin.flag_managed.app_error", nil, err.Error(), http.StatusInternalServerError)
+		return nil, model.NewAppError("installPluginLocally", "app.plugin.flag_managed.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 	f.Close()
 
-	if manifest.HasWebapp() {
-		updatedManifest, err := pluginsEnvironment.GenerateWebappBundle(manifest.Id)
+	if stashedStates[manifest.Id] != nil && stashedStates[manifest.Id].Enable {
+		updatedManifest, activated, err := pluginsEnvironment.Activate(manifest.Id)
 		if err != nil {
-			return nil, model.NewAppError("uploadPlugin", "app.plugin.flag_managed.app_error", nil, err.Error(), http.StatusInternalServerError)
+			return nil, model.NewAppError("installPluginLocally", "app.plugin.restart.app_error", nil, err.Error(), http.StatusInternalServerError)
 		}
-		manifest.Webapp.BundleHash = updatedManifest.Webapp.BundleHash
+
+		if activated && updatedManifest.HasClient() {
+			message := model.NewWebSocketEvent(model.WEBSOCKET_EVENT_PLUGIN_ENABLED, "", "", "", nil)
+			message.Add("manifest", updatedManifest.ClientManifest())
+			a.PublishLocal(message)
+		}
+		manifest = updatedManifest
 	}
 
 	return manifest, nil
