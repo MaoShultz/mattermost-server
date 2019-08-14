@@ -41,7 +41,7 @@ func (a *App) SetPluginsEnvironment(pluginsEnvironment *plugin.Environment) {
 }
 
 func (a *App) SyncPluginsActiveState() {
-	mlog.Info(fmt.Sprintln("App.SyncPluginsActiveState "))
+	mlog.Info(fmt.Sprintln("App.SyncPluginsActiveState+"))
 
 	a.Srv.PluginsLock.RLock()
 	pluginsEnvironment := a.Srv.PluginsEnvironment
@@ -124,6 +124,9 @@ func (a *App) SyncPluginsActiveState() {
 	if err := a.notifyPluginStatusesChanged(); err != nil {
 		mlog.Error("failed to notify plugin status changed", mlog.Err(err))
 	}
+
+	mlog.Info(fmt.Sprintln("App.SyncPluginsActiveState-"))
+
 }
 
 func (a *App) NewPluginAPI(manifest *model.Manifest) plugin.API {

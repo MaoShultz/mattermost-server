@@ -167,6 +167,7 @@ func (env *Environment) Activate(id string) (manifest *model.Manifest, activated
 
 	// Check if we are already active
 	if env.IsActive(id) {
+		mlog.Info(fmt.Sprintln("Environment.Activate IsActive=true"))
 		return nil, false, nil
 	}
 

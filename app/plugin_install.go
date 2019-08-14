@@ -26,6 +26,7 @@ const fileStorePluginFolder = "plugins"
 
 func (a *App) InstallPluginFromData(data model.PluginEventData) {
 	mlog.Debug("Installing plugin as per cluster message", mlog.String("plugin_id", data.Id))
+	mlog.Info("Installing plugin as per cluster message +", mlog.String("plugin_id", data.Id))
 
 	fileStorePath := a.getBundleStorePath(data.Id)
 	reader, appErr := a.FileReader(fileStorePath)
@@ -37,6 +38,9 @@ func (a *App) InstallPluginFromData(data model.PluginEventData) {
 	if _, appErr = a.installPluginLocally(reader, true); appErr != nil {
 		mlog.Error("Failed to unpack plugin from filestore", mlog.Err(appErr), mlog.String("path", fileStorePath))
 	}
+
+	mlog.Info("Installing plugin as per cluster message -")
+
 }
 
 func (a *App) RemovePluginFromData(data model.PluginEventData) {
@@ -56,10 +60,12 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 	// Stash the previous state of the plugin, if available
 	stashedStates := a.Config().PluginSettings.PluginStates
 
+	mlog.Info("installPlugin.installPluginLocally in")
 	manifest, appErr := a.installPluginLocally(pluginFile, replace)
 	if appErr != nil {
 		return nil, appErr
 	}
+	mlog.Info("installPlugin.installPluginLocally out")
 
 	// Store bundle in the file store to allow access from other servers.
 	pluginFile.Seek(0, 0)
@@ -68,6 +74,8 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 		return nil, model.NewAppError("uploadPlugin", "app.plugin.store_bundle.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 
+	mlog.Info("installPlugin.notifyClusterPluginEvent in")
+
 	a.notifyClusterPluginEvent(
 		model.CLUSTER_EVENT_INSTALL_PLUGIN,
 		model.PluginEventData{
@@ -75,9 +83,15 @@ func (a *App) installPlugin(pluginFile io.ReadSeeker, replace bool) (*model.Mani
 		},
 	)
 
+	mlog.Info("installPlugin.notifyClusterPluginEvent out")
+
 	// Enable plugin after all cluster peers are updated
 	if stashedStates[manifest.Id] != nil && stashedStates[manifest.Id].Enable {
+		mlog.Info("installPlugin.EnablePlugin in")
+
 		a.EnablePlugin(manifest.Id)
+		mlog.Info("installPlugin.EnablePlugin out")
+
 	}
 
 	if err := a.notifyPluginStatusesChanged(); err != nil {
