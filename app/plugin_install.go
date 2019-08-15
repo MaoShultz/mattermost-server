@@ -39,6 +39,10 @@ func (a *App) InstallPluginFromData(data model.PluginEventData) {
 		mlog.Error("Failed to unpack plugin from filestore", mlog.Err(appErr), mlog.String("path", fileStorePath))
 	}
 
+	if err := a.notifyPluginStatusesChanged(); err != nil {
+		mlog.Error("failed to notify plugin status changed", mlog.Err(err))
+	}
+
 	mlog.Info("Installing plugin as per cluster message -")
 
 }
@@ -48,6 +52,10 @@ func (a *App) RemovePluginFromData(data model.PluginEventData) {
 
 	if err := a.removePluginLocally(data.Id); err != nil {
 		mlog.Error("Failed to remove plugin locally", mlog.Err(err), mlog.String("id", data.Id))
+	}
+
+	if err := a.notifyPluginStatusesChanged(); err != nil {
+		mlog.Error("failed to notify plugin status changed", mlog.Err(err))
 	}
 }
 
