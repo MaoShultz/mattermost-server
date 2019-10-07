@@ -308,6 +308,7 @@ pipeline {
 						set +e
 						diff migrated.sql latest.sql > diff.txt
 						set -e
+
 						export diffErrorCode=\$?
 
 						if [ \$diffErrorCode -eq 0 ]; then echo \"Both schemas are same\";else cat diff.txt; fi

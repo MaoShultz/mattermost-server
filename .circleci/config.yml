@@ -81,6 +81,7 @@ jobs:
       name: ubuntu
     steps:
       - attach_workspace:
+
           at: ~/go/src/github.com/mattermost
       - run:
           name: Run Docker compose
@@ -240,6 +241,7 @@ jobs:
             echo "Generating diff"
             diff migrated.sql latest.sql > diff.txt && echo "Both schemas are same" || (cat diff.txt && exit 1)
           no_output_timeout: 1h
+
   upload-s3-sha:
     docker:
       - image: 'circleci/python:2.7'
@@ -304,6 +306,7 @@ workflows:
       - test-schema:
           requires:
             - setup
+
       - build:
           requires:
             - test
